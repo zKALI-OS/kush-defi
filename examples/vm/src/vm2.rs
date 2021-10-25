@@ -25,6 +25,7 @@ use halo2_utilities::{
 use orchard::constants::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains};
 use sinsemilla::chip::{SinsemillaChip, SinsemillaConfig};
 
+use crate::arith_chip::{ArithmeticChipConfig, ArithmeticChip};
 use crate::error::{Error, Result};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -70,6 +71,7 @@ pub struct MintConfig {
     pub advices: [Column<Advice>; 10],
     pub ecc_config: EccConfig,
     pub poseidon_config: PoseidonConfig<pallas::Base>,
+    pub arith_config: ArithmeticChipConfig,
 }
 
 impl MintConfig {
@@ -79,6 +81,10 @@ impl MintConfig {
 
     pub fn poseidon_chip(&self) -> PoseidonChip<pallas::Base> {
         PoseidonChip::construct(self.poseidon_config.clone())
+    }
+
+    pub fn arithmetic_chip(&self) -> ArithmeticChip {
+        ArithmeticChip::construct(self.arith_config.clone())
     }
 }
 
@@ -238,12 +244,15 @@ impl<'a> Circuit<pallas::Base> for ZkCircuit<'a> {
             rc_b,
         );
 
+        let arith_config = ArithmeticChip::configure(meta);
+
         MintConfig {
             primary,
             q_add,
             advices,
             ecc_config,
             poseidon_config,
+            arith_config,
         }
     }
 
@@ -253,6 +262,7 @@ impl<'a> Circuit<pallas::Base> for ZkCircuit<'a> {
         mut layouter: impl Layouter<pallas::Base>,
     ) -> std::result::Result<(), PlonkError> {
         let ecc_chip = config.ecc_chip();
+        let arith_chip = config.arithmetic_chip();
 
         let mut stack_base = Vec::new();
         let mut stack_scalar = Vec::new();
@@ -338,7 +348,7 @@ impl<'a> Circuit<pallas::Base> for ZkCircuit<'a> {
                     )?;
 
                     let poseidon_output = poseidon_hasher
-                        .hash(layouter.namespace(|| "Poseidon hash"), poseidon_message)?;
+                        .hash(layouter.namespace(|| "poseidon hash"), poseidon_message)?;
 
                     let poseidon_output: CellValue<pallas::Base> = poseidon_output.inner().into();
                     stack_base.push(poseidon_output);
@@ -347,21 +357,9 @@ impl<'a> Circuit<pallas::Base> for ZkCircuit<'a> {
                     assert!(*lhs_idx < stack_base.len());
                     assert!(*rhs_idx < stack_base.len());
                     let (lhs, rhs) = (stack_base[*lhs_idx], stack_base[*rhs_idx]);
-                    // todo: we need a plonk chip or make our own with add
-                    //stack_base.push(lhs.add(rhs));
-                    // for now do this bad hack
-                    let output = if lhs.value().is_some() {
-                        assert!(rhs.value().is_some());
-                        Some(lhs.value().unwrap() + rhs.value().unwrap())
-                    } else {
-                        None
-                    };
-                    let output = self.load_private(
-                        layouter.namespace(|| "load hash"),
-                        config.advices[0],
-                        output,
-                    )?;
-                    // badbadbad this value is not constrained!
+                    let output = arith_chip.add(
+                        layouter.namespace(|| "arithmetic add"),
+                        lhs, rhs)?;
                     stack_base.push(output);
                 }
                 ZkFunctionCall::ConstrainInstance(arg_idx) => {

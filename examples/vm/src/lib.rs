@@ -4,6 +4,7 @@
 //pub mod circuit;
 //pub mod cli;
 //pub mod crypto;
+pub mod arith_chip;
 pub mod endian;
 pub mod error;
 //pub mod net;
