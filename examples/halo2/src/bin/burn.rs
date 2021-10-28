@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, time::Instant};
 use std::iter;
 
 use bitvec::prelude::Lsb0;
@@ -11,8 +11,11 @@ use halo2::{
     arithmetic::{CurveAffine, Field},
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
-    pasta::{Fp, Fq},
+    pasta::{Fp, Fq, pallas, vesta},
+    plonk,
     plonk::{Circuit, ConstraintSystem, Error},
+    poly::commitment,
+    transcript::{Blake2bRead, Blake2bWrite},
 };
 use halo2_ecc::{
     chip::EccChip,
@@ -41,6 +44,11 @@ use sinsemilla::{
 };
 
 use halo2_examples::{circuit::BurnConfig, i2lebsp_k, pedersen_commitment, MERKLE_DEPTH};
+
+// The number of rows in our circuit cannot exceed 2^k
+const K: u32 = 12;
+
+const DRK_MERKLE_DEPTH: usize = 2;
 
 #[derive(Default, Debug)]
 struct BurnCircuit {
@@ -342,6 +350,84 @@ fn merkle_hash(depth: usize, lhs: &[u8; 32], rhs: &[u8; 32]) -> Fp {
         .unwrap()
 }
 
+#[derive(Debug)]
+struct VerifyingKey {
+    params: commitment::Params<vesta::Affine>,
+    vk: plonk::VerifyingKey<vesta::Affine>,
+}
+
+impl VerifyingKey {
+    fn build() -> Self {
+        let params = commitment::Params::new(K);
+        let circuit: BurnCircuit = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+
+        VerifyingKey { params, vk }
+    }
+}
+
+#[derive(Debug)]
+struct ProvingKey {
+    params: commitment::Params<vesta::Affine>,
+    pk: plonk::ProvingKey<vesta::Affine>,
+}
+
+impl ProvingKey {
+    fn build() -> Self {
+        let params = commitment::Params::new(K);
+        let circuit: BurnCircuit = Default::default();
+
+        let vk = plonk::keygen_vk(&params, &circuit).unwrap();
+        let pk = plonk::keygen_pk(&params, vk, &circuit).unwrap();
+
+        ProvingKey { params, pk }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Proof(Vec<u8>);
+
+impl AsRef<[u8]> for Proof {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Proof {
+    fn create(
+        pk: &ProvingKey,
+        circuits: &[BurnCircuit],
+        pubinputs: &[pallas::Base],
+    ) -> Result<Self, Error> {
+        let mut transcript = Blake2bWrite::<_, vesta::Affine, _>::init(vec![]);
+        plonk::create_proof(
+            &pk.params,
+            &pk.pk,
+            circuits,
+            &[&[pubinputs]],
+            &mut transcript,
+        )?;
+        Ok(Proof(transcript.finalize()))
+    }
+
+    fn verify(&self, vk: &VerifyingKey, pubinputs: &[pallas::Base]) -> Result<(), plonk::Error> {
+        let msm = vk.params.empty_msm();
+        let mut transcript = Blake2bRead::init(&self.0[..]);
+        let guard = plonk::verify_proof(&vk.params, &vk.vk, msm, &[&[pubinputs]], &mut transcript)?;
+        let msm = guard.clone().use_challenges();
+        if msm.eval() {
+            Ok(())
+        } else {
+            Err(Error::ConstraintSystemFailure)
+        }
+    }
+
+    // fn new(bytes: Vec<u8>) -> Self {
+    // Proof(bytes)
+    // }
+}
+
 fn main() {
     let secret_key = Fq::random(&mut OsRng);
     let serial = Fp::random(&mut OsRng);
@@ -403,7 +489,8 @@ fn main() {
     //
     // TODO: Review this
     let mut merkle_path = vec![true, false];
-    merkle_path.resize(MERKLE_DEPTH, true);
+    assert_eq!(merkle_path.len(), DRK_MERKLE_DEPTH);
+    //merkle_path.resize(DRK_MERKLE_DEPTH, true);
 
     let merkle_path: Vec<(Fp, bool)> = merkle_path
         .into_iter()
@@ -479,4 +566,18 @@ fn main() {
     // Valid MockProver
     let prover = MockProver::run(12, &circuit, vec![public_inputs.clone()]).unwrap();
     assert_eq!(prover.verify(), Ok(()));
+
+    // Actual ZK proof
+    let start = Instant::now();
+    let vk = VerifyingKey::build();
+    let pk = ProvingKey::build();
+    println!("\nSetup: [{:?}]", start.elapsed());
+
+    let start = Instant::now();
+    let proof = Proof::create(&pk, &[circuit], &public_inputs).unwrap();
+    println!("Prove: [{:?}]", start.elapsed());
+
+    let start = Instant::now();
+    assert!(proof.verify(&vk, &public_inputs).is_ok());
+    println!("Verify: [{:?}]", start.elapsed());
 }
