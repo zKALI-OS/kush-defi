@@ -165,11 +165,12 @@ impl Circuit<Fp> for BurnCircuit {
         config: Self::Config,
         mut layouter: impl Layouter<Fp>,
     ) -> Result<(), Error> {
+        let ecc_chip = config.ecc_chip();
+
+        /*
         // Load the Sinsemilla generator lookup table used by the whole circuit.
         SinsemillaChip::load(config.sinsemilla_config.clone(), &mut layouter)?;
-
         let sinsemilla_chip = config.sinsemilla_chip();
-        let ecc_chip = config.ecc_chip();
 
         // TODO, get this out of the if clause
         if self.secret_key.is_some() {
@@ -235,6 +236,7 @@ impl Circuit<Fp> for BurnCircuit {
             // Nullifier
             layouter.constrain_instance(hash.unwrap().0.inner().cell(), config.primary, 0)?;
         }
+        */
 
         let value = self.load_private(
             layouter.namespace(|| "load value"),
@@ -242,11 +244,11 @@ impl Circuit<Fp> for BurnCircuit {
             self.value,
         )?;
 
-        let asset = self.load_private(
-            layouter.namespace(|| "load asset"),
-            config.advices[0],
-            self.asset,
-        )?;
+        //let asset = self.load_private(
+        //    layouter.namespace(|| "load asset"),
+        //    config.advices[0],
+        //    self.asset,
+        //)?;
 
         // ================
         // Value commitment
@@ -282,36 +284,36 @@ impl Circuit<Fp> for BurnCircuit {
         // Asset commitment
         // ================
 
-        // v*G_1
-        let (commitment, _) = {
-            let asset_commit_v = OrchardFixedBases::ValueCommitV;
-            let asset_commit_v = FixedPoint::from_inner(ecc_chip.clone(), asset_commit_v);
-            asset_commit_v.mul_short(layouter.namespace(|| "[asset] ValueCommitV"), (asset, one))?
-        };
+        //// v*G_1
+        //let (commitment, _) = {
+        //    let asset_commit_v = OrchardFixedBases::ValueCommitV;
+        //    let asset_commit_v = FixedPoint::from_inner(ecc_chip.clone(), asset_commit_v);
+        //    asset_commit_v.mul_short(layouter.namespace(|| "[asset] ValueCommitV"), (asset, one))?
+        //};
 
-        // r_V*G_2
-        let (blind, _rca) = {
-            let rca = self.asset_blind;
-            let asset_commit_r = OrchardFixedBases::ValueCommitR;
-            let asset_commit_r = FixedPoint::from_inner(ecc_chip.clone(), asset_commit_r);
-            asset_commit_r.mul(layouter.namespace(|| "[asset_blind] ValueCommitR"), rca)?
-        };
+        //// r_V*G_2
+        //let (blind, _rca) = {
+        //    let rca = self.asset_blind;
+        //    let asset_commit_r = OrchardFixedBases::ValueCommitR;
+        //    let asset_commit_r = FixedPoint::from_inner(ecc_chip.clone(), asset_commit_r);
+        //    asset_commit_r.mul(layouter.namespace(|| "[asset_blind] ValueCommitR"), rca)?
+        //};
 
-        let asset_commit = commitment.add(layouter.namespace(|| "assetcommit"), &blind)?;
-        layouter.constrain_instance(asset_commit.inner().x().cell(), config.primary, 3)?;
-        layouter.constrain_instance(asset_commit.inner().y().cell(), config.primary, 4)?;
+        //let asset_commit = commitment.add(layouter.namespace(|| "assetcommit"), &blind)?;
+        //layouter.constrain_instance(asset_commit.inner().x().cell(), config.primary, 3)?;
+        //layouter.constrain_instance(asset_commit.inner().y().cell(), config.primary, 4)?;
 
         // =========================
         // Signature key derivation
         // =========================
-        let (sig_pub, _) = {
-            let spend_auth_g = OrchardFixedBases::SpendAuthG;
-            let spend_auth_g = FixedPoint::from_inner(ecc_chip.clone(), spend_auth_g);
-            spend_auth_g.mul(layouter.namespace(|| "[x_s] SpendAuthG"), self.sig_secret)?
-        };
+        //let (sig_pub, _) = {
+        //    let spend_auth_g = OrchardFixedBases::SpendAuthG;
+        //    let spend_auth_g = FixedPoint::from_inner(ecc_chip.clone(), spend_auth_g);
+        //    spend_auth_g.mul(layouter.namespace(|| "[x_s] SpendAuthG"), self.sig_secret)?
+        //};
 
-        layouter.constrain_instance(sig_pub.inner().x().cell(), config.primary, 6)?;
-        layouter.constrain_instance(sig_pub.inner().y().cell(), config.primary, 7)?;
+        //layouter.constrain_instance(sig_pub.inner().x().cell(), config.primary, 6)?;
+        //layouter.constrain_instance(sig_pub.inner().y().cell(), config.primary, 7)?;
 
         Ok(())
     }
@@ -535,14 +537,14 @@ fn main() {
     // =======================================================================
     // (N, V, A, R, P_s)
     let public_inputs = vec![
-        nullifier,
+        //nullifier,
         *value_coords.x(),
         *value_coords.y(),
-        *asset_coords.x(),
-        *asset_coords.y(),
-        merkle_root,
-        *sig_coords.x(),
-        *sig_coords.y(),
+        //*asset_coords.x(),
+        //*asset_coords.y(),
+        //merkle_root,
+        //*sig_coords.x(),
+        //*sig_coords.y(),
     ];
 
     // println!("{:?}", asset_coords.x());
